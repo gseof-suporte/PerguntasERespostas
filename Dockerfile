@@ -11,6 +11,8 @@ RUN R -e "install.packages(c('shiny', 'bslib', 'jsonlite', 'httr', 'markdown'), 
 RUN rm -rf /srv/shiny-server/*
 COPY app.R /srv/shiny-server/
 
+# Configura permissoes e desativa mascaramento de erros
+RUN chmod -R 777 /srv/shiny-server/
 RUN sed -i 's/sanitize_errors true;/sanitize_errors false;/g' /etc/shiny-server/shiny-server.conf
 
 EXPOSE 3838
