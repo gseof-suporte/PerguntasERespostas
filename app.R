@@ -2,6 +2,7 @@ library(shiny)
 library(bslib)
 library(jsonlite)
 library(httr)
+library(shinycssloaders)
 
 # ==============================================================================
 # 1. BASE DE DADOS ATUALIZADA (78 REGISTROS DA NOVA PLANILHA)
@@ -47,7 +48,7 @@ base_problemas_solucoes <- data.frame(
     "Houve uma solicitação de criação de conta contábil. Criação De Nova Conta Contábil SOF",
     "No SOF aparece a mensagem \"Competência já informada para o credor no título de número ...\". Usuária relatou que não estava conseguindo lançar um título referente a parte extra-orçamentária de abatimento feito na npd de decisão judicial.\nO sistema alerta que o título já foi feito, o que não é verdade.\nAparece o título 15.800, como já lançado, mas que ela não tem acesso.",
     "SOF informa \"o valor da retenção deve ser informado para retenção de IRRF\". Sistema apresenta um erro ao salvar, solicitando que seja informado o valor da retenção. Despesa é extraorçamentária e não é possível cadastrar retenção em extraorçamentária",
-    "A Espécie Título: Tributos Federais sequência:    está vencida e não permite pagamento.  Inconsistência CASP (IRRF TERCEIROS)",
+    "A Espécie Título: Tributos Federais sequência:   está vencida e não permite pagamento.  Inconsistência CASP (IRRF TERCEIROS)",
     "Estamos com uma fatura da CEMIG - contrato vigente, com incidência de multa, gostaríamos de uma orientação a respeito de como fazer a nota de empenho em relação ao \"vínculo de despesa\" no SOF, pois conforme orientação, o empenho para encargos deve ser feito sem pedido. VÍNCULO DE DESPESA / PAGAMENTO CEMIG - ACUMULAÇÃO DE FATURAS",
     "Necessita de autorização para emissão de empenho de indenização sem IJ. Empenho de Indenização sem IJ",
     "Mensagem: \"Competência já informada para o Credor no título de Número Provisório ...\" Problema ao executar o título (cadastro de título)",
@@ -99,7 +100,7 @@ base_problemas_solucoes <- data.frame(
     "Há duas situações em que ocorrem esse erro: quando o usuário realmente ainda não está cadastrado no SOF ou quando o cadastro está errado. Se ele não estiver cadastrado, é necessário que, primeiramente, faça o cadastro no ART. O ART envia os dados para o SOF em dois horários: 14h e final do dia. Caso a atualização tenha sido realizada após o almoço, orientar aguardar até o dia seguinte. Se o cadastro estiver errado, pode ser a matrícula que contém X e a pessoa digitou x minúsculo (SOF só aceita maiúsculo) ou pode ser a matrícula errada ou até mesmo a Empresa cadastrada (ex.: cadastrou como PBH e no SOF está como SUDECAP). Se não for nada disso, solicitar à GSEOF que abrar um SDM com os prints da tela.  ",
     "É necessário autorizar a matrícula para gerar empenho ou nota de pagamento sem título com data retroativa. Essa autorização deve ser pontual e deve ser concedida somente para o dia da requisição. Enviar solicitação à GSEOF. ",
     "O cadastro para o \"Tipo Administração\" pode não estar liberado. Enviar o código de retenção desejado para a GSEOF. ",
-    "O SOF tem um parâmetro para impedir que os usuários misturem tipos espécies na NPD.\nQuando é necessário processar dois títulos na mesma NPD, para que a NPD não fique zerada (o que não é permitido), é necessário alterar pontualmente o parâmetro dos tipo espécies 50/4 e 50/8 para que consigam liquidar. Enviar solicitação à GSEOF. ",
+    "O SOF tem um parâmetro para impedir que os usuários misturem tipos espécies na NPD.\nQuando é necessário processar dois títulos na mesma NPD, para que a NPD não fique zerada (o que não é permitted), é necessário alterar pontualmente o parâmetro dos tipo espécies 50/4 e 50/8 para que consigam liquidar. Enviar solicitação à GSEOF. ",
     "É necessário solicitar à GSEOF que habilite o usuário para o módulo de títulos.",
     "Solicitar à GSEOF a liberação.",
     "O cadastro de usuários no projeto empreendimento é realizado pela Simone Galinari ( sgsoares@pbh.gov.br). Caso seja urgente, solicitar à GSEOF.",
@@ -163,171 +164,142 @@ base_problemas_solucoes <- data.frame(
     "Verificar POP publicado no link: https://ead.pbh.gov.br/enrol/index.php?id=3889",
     "Para desagrupar as NPDs, é necessário informar o número do título acumulador na tela de acumulação, marcar todas, retorná-las para o lado esquerdo e salvar -  isso vai cancelar o título acumulador.",
     "É necessário anular as NPDs, cancelar a liberação dos títulos, alterar as datas de vencimento dos títulos, liberá-los novamente e emitir novas NPDs com a nova data de vencimento. Após isso, gerar novo acumulador e incluir o novo código de barras por meio da captura.",
-    "Sobre este assunto, cumpre esclarecer que  a multa pode ser inserida tanto no título prinicipal quanto no acumulador. Para a exclusão do valor da multa, é necessário anular a liquidação e solicitar à equipe GSEOF a exclusão do empenho da multa do título, somente após a exclusão do empenho é possível retirar o valor da multa do título. Feito isso, é possível fazer a acumulação dos títulos e a inclusão da multa no acumulador, posteriormente, faz-se a inclusão do empenho da multa por meio da alteração da despesa e é possível liquidar o valor da multa e incluir o código de barras no título via captura de código de barras. ",
-    "1) Ao gerar títulos com retenção de INSS, sempre devem enviar o email solicitando a geração do DARF.\n2) A acumulação de DARF INSS só é possível quando a despesa é processada no módulo de títulos.\n3) Sempre que houver um título no mês, mais outro título com valor menor que R$10,00, devem acumular os dois títulos, pois não é possível pagar DARF INSS com valor inferior a 10,00. Como acumular: salve o título acumulador com o título em questão. Abra o título acumulador gerado na funcionalidade de acumulação, informe sim no campo DARF INSS menor que 10,00, informe a competência inicial e final para que o SOF busque os títulos com valores inferiores a 10,00 e inclua-os no título acumulador gerado.\n4) Como acumular os títulos (regra geral): Informe os dados da NPD prinicpal nos filtros correspondentes da funcionalidade \"Atividade de Acumulação de DARF-INSS\". Ao carregar os títulos e NPDs de INSS, marque aqueles que serão pagos em um mesmo DARF para acumular, clique na seta para direita. Após clicar na seta, o sistema carregará os dados para o lado direito da tela, aí você clica em Salvar. O sistema vai retornar um número provisório de Título acumulador (anote este número para fazer a captura do código de barras). Na atividade \"Captura de Código de Barras\", no campo \"Pesquisar título por: NÚMERO PROVISÓRIO\" Informe o número do título acumulador. Após carregar os dados, o sistema abrirá um campo com o nome \"Capturar código barra\", clique nele e informe informe SIM no campo \"Via código barra\". Clique na aba Dados complementares e informe o código de barras do DARF e salve no disquete",
-    "Informe os dados da NPD prinicpal nos filtros correspondentes. Ao carregar os títulos e NPDs de INSS, marque aqueles que serão pagos em um mesmo DARF para acumular, clique na seta para direita:"
+    "Sobre este assunto, cumpre esclarecer que  a multa pode ser inserida tanto no título prinicipal quanto no acumulador. Para a exclusão do valor da multa, é necessário anular a liquidação e solicitar à equipe GSEOF a exclusão do empenho da multa do título, somente após a exclusão do empenho é possível retirar o valor da multa do título. Feito isso, é possível fazer a acumulação dos títulos e a inclusão da multa no acumulador, posteriormente, faz-se a inclusão do empenho da multa por meio da alteração da despesa e é possível liquidar o "
   ),
-  check.names = FALSE
+  stringsAsFactors = FALSE
 )
 
-dados_json <- toJSON(base_problemas_solucoes, pretty = TRUE)
-
-system_prompt_restrito <- paste(
-  "Você é um assistente virtual especialista de suporte focado em problemas e soluções do sistema SOF/GRP.",
-  "Sua função é responder às dúvidas dos usuários usando EXCLUSIVAMENTE a base de dados fornecida a seguir.",
-  "",
-  "REGRAS ESTRITAS DE RESPOSTA:",
-  "1. Responda APENAS com base nos dados fornecidos abaixo.",
-  "2. NÃO utilize conhecimentos externos nem invente soluções.",
-  "3. Se a dúvida do usuário não puder ser respondida com as informações da base de dados, responda exatamente: 'Desculpe, não encontrei essa informação na base de dados.'",
-  "",
-  "--- BASE DE DADOS (PROBLEMAS E SOLUÇÕES) ---",
-  dados_json
+# Converte o dataframe para texto estruturado para o prompt do Gemini
+conhecimento_base <- paste(
+  sapply(1:nrow(base_problemas_solucoes), function(i) {
+    paste0("PROBLEMA: ", base_problemas_solucoes$Problema.relatado[i], 
+           "\nSOLUÇÃO: ", base_problemas_solucoes$Solucao[i])
+  }),
+  collapse = "\n\n-------------------\n\n"
 )
 
 # ==============================================================================
-# 2. INTERFACE DO USUÁRIO (UI)
+# 2. FUNÇÃO DE INTEGRAÇÃO COM A API DO GEMINI
 # ==============================================================================
-ui <- page_fluid(
-  theme = bs_theme(version = 5, bootswatch = "flatly"),
+chamar_gemini <- function(pergunta_usuario, historico_chat = NULL) {
+  api_key <- Sys.getenv("GEMINI_API_KEY")
   
-  tags$head(
-    tags$style(HTML("
-      .main-container {
-        max-width: 900px;
-        margin: 0 auto;
-        padding-top: 30px;
-        padding-bottom: 50px;
-      }
-      .card-resposta {
-        background-color: #ffffff;
-        border: 1px solid #e3e6f0;
-        border-radius: 8px;
-        padding: 20px;
-        margin-top: 20px;
-        box-shadow: 0 0.15rem 1.75rem 0 rgba(58, 59, 69, 0.05);
-      }
-      .card-resposta p, .card-resposta li {
-        font-size: 1.05rem;
-        line-height: 1.6;
-        color: #2c3e50;
-      }
-    "))
-  ),
+  if (api_key == "") {
+    return("Erro: A chave de API 'GEMINI_API_KEY' não foi configurada no ambiente do servidor Render.")
+  }
   
-  div(
-    class = "main-container",
-    h2("Assistente de Suporte SOF - Inteligência Artificial", class = "mb-1 text-primary"),
-    p("Agente virtual de consultas rápidas à base de dados interna.", class = "text-muted mb-4"),
-    
-    card(
-      card_body(
-        textAreaInput(
-          "pergunta", 
-          "Digite a sua dúvida:", 
-          rows = 3, 
-          width = "100%",
-          placeholder = "Ex: Como proceder para acumular DARF?"
-        ),
-        actionButton(
-          "btn_enviar", 
-          "Enviar Pergunta", 
-          class = "btn-primary w-100 mt-2"
-        )
+  url <- paste0("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=", api_key)
+  
+  system_instruction <- paste(
+    "Você é o Assistente Virtual de Suporte do SOF (Sistema de Orçamento e Finanças) da PBH.",
+    "Sua função é orientar os usuários com base EXCLUSIVAMENTE no conhecimento interno fornecido a seguir.\n\n",
+    "BASE DE CONHECIMENTO INTERNO DO SOF:\n",
+    conhecimento_base,
+    "\n\nDIRETRIZES DE RESPOSTA:\n",
+    "1. Responda de forma direta, clara, cortês e profissional.\n",
+    "2. Se a dúvida do usuário corresponder a algum problema da base, forneça exatamente o passo a passo da solução indicada.\n",
+    "3. Se houver e-mails de contato (ex: GSEOF, mclara@pbh.gov.br, sergioe@pbh.gov.br, etc.) ou links do EAD na solução correspondente, inclua-os na resposta.\n",
+    "4. Se a dúvida NÃO tiver relação com o SOF ou não constar na base fornecida, responda gentilmente que não possui essa informação na sua base de dados atual e oriente o usuário a entrar em contato com a equipe da GSEOF."
+  )
+  
+  body <- list(
+    system_instruction = list(
+      parts = list(list(text = system_instruction))
+    ),
+    contents = list(
+      list(
+        role = "user",
+        parts = list(list(text = pergunta_usuario))
       )
     ),
+    generationConfig = list(
+      temperature = 0.2
+    )
+  )
+  
+  res <- POST(
+    url = url,
+    content_type_json(),
+    body = toJSON(body, auto_unbox = TRUE)
+  )
+  
+  if (status_code(res) == 200) {
+    dados <- content(res, as = "parsed")
     
-    uiOutput("area_resposta")
+    # Extração segura da resposta
+    if (!is.null(dados$candidates) && length(dados$candidates) > 0) {
+      resposta_texto <- dados$candidates[[1]]$content$parts[[1]]$text
+      return(resposta_texto)
+    } else {
+      return("Não foi possível extrair uma resposta válida do modelo.")
+    }
+  } else {
+    erro_detalhe <- content(res, as = "text", encoding = "UTF-8")
+    return(paste0("Erro na comunicação com a API Gemini (Código ", status_code(res), "): ", erro_detalhe))
+  }
+}
+
+# ==============================================================================
+# 3. INTERFACE DO USUÁRIO (UI - SHINY)
+# ==============================================================================
+ui <- page_sidebar(
+  theme = bs_theme(
+    version = 5,
+    bootswatch = "zephyr",
+    primary = "#0d6efd"
+  ),
+  
+  title = "Suporte SOF - Prefeitura de Belo Horizonte",
+  
+  sidebar = sidebar(
+    width = 320,
+    h4("Atendimento SOF"),
+    p("Digite abaixo a sua dúvida ou a mensagem de erro retornada pelo SOF/GRP para obter a orientação correta."),
+    hr(),
+    textAreaInput("pergunta", "Descrição do Problema / Erro:", placeholder = "Ex: Ocorreu erro ORA20000 ao tentar anular restos a pagar...", rows = 5),
+    actionButton("btn_enviar", "Enviar Pergunta", class = "btn-primary w-100", icon = icon("paper-plane")),
+    hr(),
+    helpText("Base de conhecimento atualizada com os procedimentos operacionais da GSEOF.")
+  ),
+  
+  card(
+    card_header(
+      class = "bg-primary text-white font-weight-bold",
+      " Orientação do Assistente"
+    ),
+    card_body(
+      withSpinner(uiOutput("resposta"), type = 6, color = "#0275d8")
+    )
   )
 )
 
 # ==============================================================================
-# 3. LÓGICA DO SERVIDOR (SERVER)
+# 4. LÓGICA DO SERVIDOR (SERVER - SHINY)
 # ==============================================================================
 server <- function(input, output, session) {
   
-  chave_api <- Sys.getenv("GEMINI_API_KEY")
-  
-  resposta_val <- eventReactive(input$btn_enviar, {
+  # Armazena a resposta atual
+  conteudo_resposta <- eventReactive(input$btn_enviar, {
     req(input$pergunta)
     
-    url_api <- paste0(
-      "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=", 
-      chave_api
-    )
-    
-    corpo_requisicao <- list(
-      system_instruction = list(
-        parts = list(list(text = system_prompt_restrito))
-      ),
-      contents = list(
-        list(
-          role = "user",
-          parts = list(list(text = input$pergunta))
-        )
-      )
-    )
-    
-    max_tentativas <- 3
-    tentativa <- 1
-    sucesso <- FALSE
-    resultado <- NULL
-    
-    while (tentativa <= max_tentativas && !sucesso) {
-      res <- tryCatch({
-        POST(
-          url_api,
-          body = corpo_requisicao,
-          encode = "json",
-          content_type_json()
-        )
-      }, error = function(e) {
-        return(NULL)
-      })
-      
-      if (!is.null(res)) {
-        status <- status_code(res)
-        conteudo <- content(res, as = "parsed")
-        
-        if (status == 200 && is.null(conteudo$error)) {
-          sucesso <- TRUE
-          resultado <- conteudo$candidates[[1]]$content$parts[[1]]$text
-        } else {
-          msg_erro <- if (!is.null(conteudo$error$message)) conteudo$error$message else ""
-          
-          if (status %in% c(429, 503) || grepl("demand|quota|limit", msg_erro, ignore.case = TRUE)) {
-            Sys.sleep(2 * tentativa)
-            tentativa <- tentativa + 1
-          } else {
-            return(paste("Erro da API Gemini:", msg_erro))
-          }
-        }
-      } else {
-        Sys.sleep(2 * tentativa)
-        tentativa <- tentativa + 1
-      }
-    }
-    
-    if (sucesso) {
-      return(resultado)
-    } else {
-      return("A API do Gemini está com alta demanda no momento. Aguarde alguns segundos e clique em 'Enviar Pergunta' novamente.")
-    }
+    # Chama a função do Gemini enviando a pergunta digitada
+    resposta_gemini <- chamar_gemini(input$pergunta)
+    return(resposta_gemini)
   })
   
-  output$area_resposta <- renderUI({
-    res <- resposta_val()
-    req(res)
+  output$resposta <- renderUI({
+    if (input$btn_enviar == 0) {
+      return(HTML("<p class='text-muted'>A resposta para a sua dúvida aparecerá aqui assim que você enviar a pergunta.</p>"))
+    }
     
-    div(
-      class = "card-resposta",
-      h5("Resposta do Agente:", class = "mb-3 text-secondary"),
-      markdown(res)
-    )
+    texto <- conteudo_resposta()
+    
+    # Renderiza o retorno formatado em Markdown/HTML
+    HTML(markdown::markdownToHTML(text = texto, fragment.only = TRUE))
   })
 }
 
 # ==============================================================================
-# 4. EXECUÇÃO DO APLICATIVO
+# 5. EXECUÇÃO DO APLICATIVO
 # ==============================================================================
 shinyApp(ui = ui, server = server)
