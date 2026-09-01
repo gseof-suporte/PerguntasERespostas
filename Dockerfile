@@ -1,6 +1,6 @@
 FROM rocker/shiny:latest
 
-# 1. Instala as dependências de sistema necessárias do Linux
+# 1. Dependências do sistema Linux para o Shiny e leitura do Excel (libxml2, etc)
 RUN apt-get update && apt-get install -y \
     libcurl4-gnutls-dev \
     libssl-dev \
@@ -8,13 +8,13 @@ RUN apt-get update && apt-get install -y \
     libuv1-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# 2. Instala TODOS os pacotes R utilizados no app.R
-RUN R -e "install.packages(c('shiny', 'bslib', 'jsonlite', 'httr', 'markdown', 'shinycssloaders'), repos='https://cloud.r-project.org/')"
+# 2. Instalação dos pacotes R necessários (incluindo readxl)
+RUN R -e "install.packages(c('shiny', 'bslib', 'jsonlite', 'httr', 'markdown', 'shinycssloaders', 'readxl'), repos='https://cloud.r-project.org/')"
 
-# 3. Copia a aplicação
+# 3. Define pasta de trabalho e copia TODOS os arquivos (incluindo a planilha)
 WORKDIR /app
-COPY app.R /app/app.R
+COPY . /app
 
-# 4. Expõe a porta e define o comando de inicialização
+# 4. Configuração de porta e execução
 EXPOSE 3838
 CMD ["R", "-e", "shiny::runApp('/app/app.R', host = '0.0.0.0', port = 3838)"]
