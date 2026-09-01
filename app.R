@@ -8,7 +8,7 @@ if (dir.exists("imagens")) {
   addResourcePath("imagens", "imagens")
 }
 
-# 1. Carregamento dos dados do Excel
+# 1. Carregamento e Preparação dos Dados
 dados_excel <- read_excel("Problemas e soluções para IA.xlsx")
 
 if (!"Imagem" %in% colnames(dados_excel)) {
@@ -33,7 +33,32 @@ stopwords_pt <- c(
   "ter", "tem", "tenho", "ser", "são", "foi", "fui", "vai", "vou", "pode", "podem"
 )
 
-# 2. Interface do Usuário (UI) com alinhamento perfeito dos elementos
+# Função auxiliar para criar card de resposta
+criar_card <- function(res_row, i, titulo_prefixo = "Resultado Relevante") {
+  imagem_nome <- res_row$Imagem
+  tem_imagem <- !is.na(imagem_nome) && imagem_nome != "" && imagem_nome != "NA"
+  
+  card(
+    class = "mb-3 border-start border-primary border-4 shadow-sm",
+    card_header(class = "fw-bold text-primary", paste(titulo_prefixo, "#", i)),
+    card_body(
+      p(tags$b("Problema: "), res_row$Problema),
+      hr(),
+      p(tags$b("💡 Solução Encontrada: "), res_row$Solucao, style = "font-size: 1.05rem;"),
+      
+      if (tem_imagem) {
+        div(class = "text-center mt-3",
+          tags$img(
+            src = file.path("imagens", imagem_nome), 
+            style = "max-width: 100%; height: auto; border: 1px solid #dee2e6; border-radius: 6px; padding: 4px;"
+          )
+        )
+      }
+    )
+  )
+}
+
+# 2. Interface do Usuário (UI)
 ui <- page_fluid(
   theme = bs_theme(version = 5, bootswatch = "zephyr"),
   
@@ -46,13 +71,13 @@ ui <- page_fluid(
     
     card(
       card_body(
-        class = "d-flex flex-column gap-2", # Alinha todos os elementos em coluna com mesma largura
+        class = "d-flex flex-column gap-2",
         textAreaInput(
           "pergunta_usuario", 
           label = NULL, 
-          placeholder = "Ex: permissão a uo 3100", 
+          placeholder = "Ex: permissão a uo 2100", 
           rows = 3,
-          width = "100%" # Força a caixa a ocupar 100% da largura do card
+          width = "100%"
         ),
         actionButton(
           "btn_perguntar", 
@@ -76,7 +101,21 @@ ui <- page_fluid(
 # 3. Servidor (Logic)
 server <- function(input, output, session) {
   
-  resultado <- eventReactive(input$btn_perguntar, {
+  # Estado reativo para controlar a exibição das respostas adicionais
+  mostrar_mais <- reactiveVal(FALSE)
+  
+  # Reseta o botão de "mostrar mais" sempre que fizer uma nova busca
+  observeEvent(input$btn_perguntar, {
+    mostrar_mais(FALSE)
+  })
+  
+  # Evento do clique em "Mostrar mais respostas"
+  observeEvent(input$btn_mostrar_mais, {
+    mostrar_mais(TRUE)
+  })
+  
+  # Busca e hierarquização dos resultados
+  resultados_ranqueados <- eventReactive(input$btn_perguntar, {
     req(input$pergunta_usuario)
     
     texto_raw <- trimws(tolower(input$pergunta_usuario))
@@ -89,29 +128,36 @@ server <- function(input, output, session) {
     
     if (length(palavras_chave) == 0) return("NENHUMA")
     
+    # Pontuação por número de palavras correspondentes + peso para termos no Problema
     pontuacao <- sapply(1:nrow(df_faq), function(i) {
-      texto_linha <- tolower(paste(df_faq$Problema[i], df_faq$Solucao[i]))
+      prob_text <- tolower(df_faq$Problema[i])
+      sol_text  <- tolower(df_faq$Solucao[i])
       
-      score <- sum(sapply(palavras_chave, function(p) {
+      score <- 0
+      for (p in palavras_chave) {
         pattern <- paste0("\\b", p, "\\b")
-        if (grepl(pattern, texto_linha)) return(1)
-        if (grepl(p, texto_linha, fixed = TRUE)) return(0.5)
-        return(0)
-      }))
+        if (grepl(pattern, prob_text)) {
+          score <- score + 2  # Termo encontrado no Problema tem peso 2
+        } else if (grepl(pattern, sol_text)) {
+          score <- score + 1  # Termo encontrado na Solução tem peso 1
+        }
+      }
       return(score)
     })
     
     max_pontos <- max(pontuacao)
-    
     if (max_pontos == 0) return("NENHUMA")
     
-    indices <- which(pontuacao == max_pontos)
+    # Ordena todos com pontuação > 0 do maior para o menor
+    indices <- which(pontuacao > 0)
+    indices <- indices[order(pontuacao[indices], decreasing = TRUE)]
     
     return(df_faq[indices, ])
   })
   
+  # Renderização da Interface das Respostas
   output$respostas_container <- renderUI({
-    res <- resultado()
+    res <- resultados_ranqueados()
     
     if (is.null(res)) return(NULL)
     
@@ -125,34 +171,45 @@ server <- function(input, output, session) {
       )
     }
     
-    card_list <- lapply(1:nrow(res), function(i) {
-      
-      imagem_nome <- res$Imagem[i]
-      tem_imagem <- !is.na(imagem_nome) && imagem_nome != "" && imagem_nome != "NA"
-      
-      card(
-        class = "mb-3 border-start border-primary border-4",
-        card_header(class = "fw-bold text-primary", paste("Problema Relacionado #", i)),
-        card_body(
-          p(tags$b("Problema: "), res$Problema[i]),
-          hr(),
-          p(tags$b("💡 Solução Encontrada: "), res$Solucao[i], style = "font-size: 1.05rem;"),
-          
-          if (tem_imagem) {
-            div(class = "text-center mt-3",
-              tags$img(
-                src = file.path("imagens", imagem_nome), 
-                style = "max-width: 100%; height: auto; border: 1px solid #dee2e6; border-radius: 6px; padding: 4px;"
-              )
-            )
-          }
-        )
-      )
-    })
+    # 1. Primeira resposta (melhor pontuada)
+    melhor_resposta <- criar_card(res[1, ], 1, "Principal Resposta Encontrada")
     
+    # Se houver apenas 1 resultado relevante na base
+    if (nrow(res) == 1) {
+      return(tagList(
+        h4(class = "mb-3", "Resultado da Busca:"),
+        melhor_resposta
+      ))
+    }
+    
+    # 2. Respostas secundárias (da 2ª em diante)
+    cards_secundarios <- NULL
+    if (mostrar_mais()) {
+      cards_secundarios <- lapply(2:nrow(res), function(i) {
+        criar_card(res[i, ], i, "Outra Opção Relacionada")
+      })
+    }
+    
+    # Interface combinada com o botão "Mostrar mais respostas"
     tagList(
-      h4(class = "mb-3", "Resultados da Busca:"),
-      card_list
+      h4(class = "mb-3", "Resultado da Busca:"),
+      melhor_resposta,
+      
+      if (!mostrar_mais()) {
+        div(class = "text-center my-3",
+          actionButton(
+            "btn_mostrar_mais", 
+            paste("Mostrar mais respostas (", nrow(res) - 1, "outras opções )"), 
+            class = "btn-outline-primary fw-bold px-4 py-2"
+          )
+        )
+      } else {
+        tagList(
+          hr(class = "my-4"),
+          h5(class = "mb-3 text-muted", "Outras respostas possíveis:"),
+          cards_secundarios
+        )
+      }
     )
   })
 }
