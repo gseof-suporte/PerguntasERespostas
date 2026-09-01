@@ -3,15 +3,14 @@ library(bslib)
 library(readxl)
 library(shinycssloaders)
 
-# Libera o acesso à pasta 'imagens' no Shiny
+# Mapeia a pasta 'imagens' caso ela exista
 if (dir.exists("imagens")) {
   addResourcePath("imagens", "imagens")
 }
 
-# 1. Carregamento e Preparação dos Dados
+# 1. Carregamento dos dados do Excel
 dados_excel <- read_excel("Problemas e soluções para IA.xlsx")
 
-# Garante que a coluna Imagem exista no dataframe
 if (!"Imagem" %in% colnames(dados_excel)) {
   dados_excel$Imagem <- NA
 }
@@ -23,7 +22,7 @@ df_faq <- data.frame(
   stringsAsFactors = FALSE
 )
 
-# Lista expandida de stopwords em português
+# Lista de stopwords em português
 stopwords_pt <- c(
   "o", "a", "os", "as", "um", "uma", "uns", "umas", "de", "do", "da", "dos", "das",
   "em", "no", "na", "nos", "nas", "ao", "aos", "à", "às", "por", "pelo", "pela",
@@ -34,7 +33,7 @@ stopwords_pt <- c(
   "ter", "tem", "tenho", "ser", "são", "foi", "fui", "vai", "vou", "pode", "podem"
 )
 
-# 2. Interface do Usuário (UI)
+# 2. Interface do Usuário (UI) com alinhamento perfeito dos elementos
 ui <- page_fluid(
   theme = bs_theme(version = 5, bootswatch = "zephyr"),
   
@@ -47,13 +46,19 @@ ui <- page_fluid(
     
     card(
       card_body(
+        class = "d-flex flex-column gap-2", # Alinha todos os elementos em coluna com mesma largura
         textAreaInput(
           "pergunta_usuario", 
           label = NULL, 
-          placeholder = "Ex: O que fazer para desdobrar o título?", 
-          rows = 3
+          placeholder = "Ex: permissão a uo 3100", 
+          rows = 3,
+          width = "100%" # Força a caixa a ocupar 100% da largura do card
         ),
-        actionButton("btn_perguntar", "Buscar Resposta", class = "btn-primary w-100 fw-bold")
+        actionButton(
+          "btn_perguntar", 
+          "Buscar Resposta", 
+          class = "btn-primary w-100 fw-bold py-2"
+        )
       )
     ),
     
@@ -74,36 +79,35 @@ server <- function(input, output, session) {
   resultado <- eventReactive(input$btn_perguntar, {
     req(input$pergunta_usuario)
     
-    # Normalização e limpeza do texto
     texto_raw <- trimws(tolower(input$pergunta_usuario))
     if (texto_raw == "") return(NULL)
     
     texto_limpo <- gsub("[[:punct:]]", " ", texto_raw)
     palavras <- unlist(strsplit(texto_limpo, "\\s+"))
     
-    # 1. Filtragem rigorosa de Stopwords
-    palavras_chave <- palavras[!palavras %in% stopwords_pt & nchar(palavras) > 2]
+    palavras_chave <- palavras[!palavras %in% stopwords_pt & nchar(palavras) >= 2]
     
-    # Se todas as palavras forem stopwords/curtas, invalida a busca
     if (length(palavras_chave) == 0) return("NENHUMA")
     
-    # 2. Cálculo da pontuação por relevância
     pontuacao <- sapply(1:nrow(df_faq), function(i) {
       texto_linha <- tolower(paste(df_faq$Problema[i], df_faq$Solucao[i]))
-      # Conta quantas palavras-chave aparecem na linha
-      sum(sapply(palavras_chave, function(p) grepl(p, texto_linha, fixed = TRUE)))
+      
+      score <- sum(sapply(palavras_chave, function(p) {
+        pattern <- paste0("\\b", p, "\\b")
+        if (grepl(pattern, texto_linha)) return(1)
+        if (grepl(p, texto_linha, fixed = TRUE)) return(0.5)
+        return(0)
+      }))
+      return(score)
     })
     
     max_pontos <- max(pontuacao)
     
-    # Exige pontuação mínima (pelo menos 1 palavra-chave principal deve existir na base)
     if (max_pontos == 0) return("NENHUMA")
     
-    # Filtra e ordena apenas os resultados com correspondência válida
-    indices <- which(pontuacao > 0)
-    indices <- indices[order(pontuacao[indices], decreasing = TRUE)]
+    indices <- which(pontuacao == max_pontos)
     
-    return(df_faq[head(indices, 3), ])
+    return(df_faq[indices, ])
   })
   
   output$respostas_container <- renderUI({
@@ -111,7 +115,6 @@ server <- function(input, output, session) {
     
     if (is.null(res)) return(NULL)
     
-    # Exibição da mensagem padronizada de falha (evita falsos positivos)
     if (is.character(res) && res == "NENHUMA") {
       return(
         div(class = "alert alert-warning text-center p-4",
@@ -122,7 +125,6 @@ server <- function(input, output, session) {
       )
     }
     
-    # Renderização das soluções encontradas
     card_list <- lapply(1:nrow(res), function(i) {
       
       imagem_nome <- res$Imagem[i]
