@@ -253,4 +253,18 @@ server <- function(input, output, session) {
   })
 }
 
-shinyApp(ui = ui, server = server)
+# ==============================================================================
+# 5. EXECUÇÃO ADAPTADA PARA O RENDER (PORT BINDING)
+# ==============================================================================
+
+# Captura a porta injetada pelo Render ou define 10000 como padrão
+porta_app <- as.numeric(Sys.getenv("PORT", unset = "10000"))
+
+shinyApp(
+  ui = ui, 
+  server = server,
+  options = list(
+    host = "0.0.0.0", 
+    port = porta_app
+  )
+)
