@@ -8,14 +8,9 @@ RUN apt-get update && apt-get install -y \
 
 RUN R -e "install.packages(c('shiny', 'bslib', 'jsonlite', 'httr', 'markdown'), repos='https://cloud.r-project.org/')"
 
-RUN rm -rf /srv/shiny-server/*
-COPY app.R /srv/shiny-server/
-
-# Configura permissoes e desativa mascaramento de erros
-RUN chmod -R 777 /srv/shiny-server/
-RUN sed -i 's/sanitize_errors true;/sanitize_errors false;/g' /etc/shiny-server/shiny-server.conf
+WORKDIR /app
+COPY app.R /app/app.R
 
 EXPOSE 3838
 
-ENV PORT=3838
-CMD ["/usr/bin/shiny-server"]
+CMD ["R", "-e", "shiny::runApp('/app/app.R', host = '0.0.0.0', port = 3838)"]
