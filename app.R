@@ -22,9 +22,6 @@ ui <- page_fluid(
       p(class = "text-muted", "Digite sua dúvida ou o problema que está enfrentando no sistema:")
     ),
     
-    # Status de carregamento do modelo de IA
-    uiOutput("status_modelo_ui"),
-    
     card(
       card_body(
         class = "d-flex flex-column gap-2",
@@ -60,75 +57,45 @@ ui <- page_fluid(
 
 server <- function(input, output, session) {
   
-  # Valores reativos para guardar o modelo e os embeddings carregados
-  modelo_ia <- reactiveVal(NULL)
-  embeddings_base <- reactiveVal(NULL)
-  df_faq_data <- reactiveVal(NULL)
+  # Estados reativos
   mostrar_mais <- reactiveVal(FALSE)
   
-  # Carregamento do modelo em background assim que o Shiny abre a porta
-  observe({
-    invalidateLater(100, session)
-    if (is.null(modelo_ia())) {
-      message(">>> Carregando Python e Modelo Semântico...")
-      
-      # Garante a utilização do virtualenv do Docker
-      if (file.exists("/opt/venv/bin/python")) {
-        use_virtualenv("/opt/venv", required = TRUE)
-      }
-      
-      st <- import("sentence_transformers")
-      model <- st$SentenceTransformer("sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
-      
-      # Carrega planilha
-      dados_excel <- read_excel("Problemas e soluções para IA.xlsx")
-      if (!"Imagem" %in% colnames(dados_excel)) {
-        dados_excel$Imagem <- NA
-      }
-      
-      df_faq <- data.frame(
-        Problema = as.character(dados_excel$`Problema relatado`),
-        Solucao = as.character(dados_excel$`Solução`),
-        Imagem = trimws(as.character(dados_excel$Imagem)),
-        stringsAsFactors = FALSE
-      )
-      
-      df_faq$TextoCompleto <- paste("Problema:", df_faq$Problema, "| Solução:", df_faq$Solucao)
-      
-      message(">>> Gerando embeddings da base de dados...")
-      doc_embeds <- model$encode(df_faq$TextoCompleto, normalize_embeddings = TRUE)
-      
-      # Salva os dados nos estados reativos
-      df_faq_data(df_faq)
-      embeddings_base(doc_embeds)
-      modelo_ia(model)
-      
-      message(">>> Modelo Semântico Pronto!")
+  # Função para carregar o modelo Python apenas quando necessário
+  get_modelo_e_dados <- reactiveExpr({
+    message(">>> Inicializando Python e Modelo Semântico...")
+    
+    if (file.exists("/opt/venv/bin/python")) {
+      use_virtualenv("/opt/venv", required = TRUE)
     }
-  })
-  
-  # UI do status do modelo
-  output$status_modelo_ui <- renderUI({
-    if (is.null(modelo_ia())) {
-      div(
-        class = "alert alert-info d-flex align-items-center mb-3",
-        span(class = "spinner-border spinner-border-sm me-2", role = "status"),
-        span("Inicializando motor de inteligência artificial... Aguarde alguns segundos.")
-      )
-    } else {
-      NULL
+    
+    st <- import("sentence_transformers")
+    model <- st$SentenceTransformer("sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
+    
+    dados_excel <- read_excel("Problemas e soluções para IA.xlsx")
+    if (!"Imagem" %in% colnames(dados_excel)) {
+      dados_excel$Imagem <- NA
     }
+    
+    df_faq <- data.frame(
+      Problema = as.character(dados_excel$`Problema relatado`),
+      Solucao = as.character(dados_excel$`Solução`),
+      Imagem = trimws(as.character(dados_excel$Imagem)),
+      stringsAsFactors = FALSE
+    )
+    
+    df_faq$TextoCompleto <- paste("Problema:", df_faq$Problema, "| Solução:", df_faq$Solucao)
+    doc_embeds <- model$encode(df_faq$TextoCompleto, normalize_embeddings = TRUE)
+    
+    list(model = model, doc_embeds = doc_embeds, df_faq = df_faq)
   })
-  
+
   observeEvent(input$btn_perguntar, { mostrar_mais(FALSE) })
   observeEvent(input$btn_mostrar_mais, { mostrar_mais(TRUE) })
   
-  # Função de similaridade
   cosine_similarity <- function(query_vec, doc_vecs) {
     as.numeric(doc_vecs %*% t(query_vec))
   }
   
-  # Renderização do cartão
   criar_card <- function(res_row, i, titulo_prefixo = "Resultado Relevante") {
     imagem_nome <- res_row$Imagem
     tem_imagem <- !is.na(imagem_nome) && 
@@ -172,21 +139,18 @@ server <- function(input, output, session) {
     )
   }
   
-  # Ranqueamento dos resultados
+  # Processamento ao clicar em Buscar Resposta
   resultados_ranqueados <- eventReactive(input$btn_perguntar, {
     req(input$pergunta_usuario)
-    
-    if (is.null(modelo_ia())) {
-      showNotification("O motor de IA ainda está inicializando. Tente em instantes.", type = "warning")
-      return(NULL)
-    }
-    
     texto_raw <- trimws(input$pergunta_usuario)
     if (texto_raw == "") return(NULL)
     
-    model <- modelo_ia()
-    doc_embeds <- embeddings_base()
-    df_faq <- df_faq_data()
+    # Executa o carregamento sem travar o loop do Shiny
+    base_ia <- get_modelo_e_dados()
+    
+    model <- base_ia$model
+    doc_embeds <- base_ia$doc_embeds
+    df_faq <- base_ia$df_faq
     
     query_vec <- model$encode(list(texto_raw), normalize_embeddings = TRUE)
     scores <- cosine_similarity(query_vec, doc_embeds)
@@ -201,7 +165,6 @@ server <- function(input, output, session) {
     return(df_res)
   })
   
-  # Renderização da Interface das Respostas
   output$respostas_container <- renderUI({
     res <- resultados_ranqueados()
     if (is.null(res)) return(NULL)
@@ -242,7 +205,7 @@ server <- function(input, output, session) {
 }
 
 # ==============================================================================
-# EXECUÇÃO DO SHINY COM BINDING IMEDIATO DE PORTA
+# EXECUÇÃO DO SHINY
 # ==============================================================================
 
 porta_app <- as.numeric(Sys.getenv("PORT", unset = "10000"))
