@@ -1,39 +1,14 @@
-# ==============================================================================
-# 1. VERIFICAÇÃO E INSTALAÇÃO AUTOMÁTICA DE DEPENDÊNCIAS (R E PYTHON)
-# ==============================================================================
-
-# Pacotes do R necessários
-pacotes_r <- c("shiny", "bslib", "readxl", "shinycssloaders", "reticulate")
-
-# Instala pacotes do R ausentes automaticamente
-novos_pacotes <- pacotes_r[!(pacotes_r %in% installed.packages()[, "Package"])]
-if (length(novos_pacotes) > 0) {
-  message("Instalando pacotes R necessários: ", paste(novos_pacotes, collapse = ", "))
-  install.packages(novos_pacotes, repos = "https://cloud.r-project.org")
-}
-
-# Carrega as bibliotecas do R
 library(shiny)
 library(bslib)
 library(readxl)
 library(shinycssloaders)
 library(reticulate)
 
-# Garantir dependência Python (sentence-transformers)
-message("Verificando dependências Python...")
-tryCatch({
-  st <- import("sentence_transformers")
-}, error = function(e) {
-  message("Instalando biblioteca 'sentence-transformers' no Python...")
-  py_install("sentence-transformers")
-  st <<- import("sentence_transformers")
-})
+# Force a utilização do Python do ambiente do sistema/virtualenv
+use_virtualenv("/opt/venv", required = TRUE)
 
-# ==============================================================================
-# 2. INICIALIZAÇÃO DO MODELO SEMÂNTICO E DADOS
-# ==============================================================================
-
-# Inicializa o modelo semântico
+# Inicializa o modelo de busca semântica pré-baixado
+st <- import("sentence_transformers")
 model <- st$SentenceTransformer("sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
 
 # Mapeia a pasta 'imagens' caso exista
@@ -41,7 +16,7 @@ if (dir.exists("imagens")) {
   addResourcePath("imagens", "imagens")
 }
 
-# Carregamento e Preparação dos Dados
+# Carregamento dos Dados
 dados_excel <- read_excel("Problemas e soluções para IA.xlsx")
 
 if (!"Imagem" %in% colnames(dados_excel)) {
@@ -55,19 +30,17 @@ df_faq <- data.frame(
   stringsAsFactors = FALSE
 )
 
-# Cria texto enriquecido e gera embeddings na inicialização
+# Pré-calcula os vetores na inicialização
 df_faq$TextoCompleto <- paste("Problema:", df_faq$Problema, "| Solução:", df_faq$Solucao)
 
-message("Calculando vetores semânticos da base de dados...")
+message("Calculando vetores semânticos...")
 doc_embeddings <- model$encode(df_faq$TextoCompleto, normalize_embeddings = TRUE)
-message("Vetores gerados com sucesso!")
+message("Pronto!")
 
-# Função para cálculo de similaridade de cosseno
 cosine_similarity <- function(query_vec, doc_vecs) {
   as.numeric(doc_vecs %*% t(query_vec))
 }
 
-# Função auxiliar para criar os cards de resposta
 criar_card <- function(res_row, i, titulo_prefixo = "Resultado Relevante") {
   imagem_nome <- res_row$Imagem
   tem_imagem <- !is.na(imagem_nome) && 
@@ -111,97 +84,53 @@ criar_card <- function(res_row, i, titulo_prefixo = "Resultado Relevante") {
   )
 }
 
-# ==============================================================================
-# 3. INTERFACE DO USUÁRIO (UI)
-# ==============================================================================
-
+# UI
 ui <- page_fluid(
   theme = bs_theme(version = 5, bootswatch = "zephyr"),
-  
   div(class = "container py-4", style = "max-width: 800px;",
-    
     div(class = "text-center mb-4",
       h2("🤖 Assistente de Suporte"),
       p(class = "text-muted", "Digite sua dúvida ou o problema que está enfrentando no sistema:")
     ),
-    
     card(
       card_body(
         class = "d-flex flex-column gap-2",
-        textAreaInput(
-          "pergunta_usuario", 
-          label = NULL, 
-          placeholder = "Ex: cadastro de usuário", 
-          rows = 3,
-          width = "100%"
-        ),
-        actionButton(
-          "btn_perguntar", 
-          "Buscar Resposta", 
-          class = "btn-primary w-100 fw-bold py-2"
-        )
+        textAreaInput("pergunta_usuario", label = NULL, placeholder = "Ex: cadastro de usuário", rows = 3, width = "100%"),
+        actionButton("btn_perguntar", "Buscar Resposta", class = "btn-primary w-100 fw-bold py-2")
       )
     ),
-    
     br(),
-    
-    withSpinner(
-      uiOutput("respostas_container"),
-      type = 6,
-      color = "#0d6efd",
-      size = 1
-    )
+    withSpinner(uiOutput("respostas_container"), type = 6, color = "#0d6efd", size = 1)
   )
 )
 
-# ==============================================================================
-# 4. SERVIDOR (LOGIC)
-# ==============================================================================
-
+# Server
 server <- function(input, output, session) {
-  
   mostrar_mais <- reactiveVal(FALSE)
   
-  observeEvent(input$btn_perguntar, {
-    mostrar_mais(FALSE)
-  })
+  observeEvent(input$btn_perguntar, { mostrar_mais(FALSE) })
+  observeEvent(input$btn_mostrar_mais, { mostrar_mais(TRUE) })
   
-  observeEvent(input$btn_mostrar_mais, {
-    mostrar_mais(TRUE)
-  })
-  
-  # Processamento da Busca Semântica
   resultados_ranqueados <- eventReactive(input$btn_perguntar, {
     req(input$pergunta_usuario)
-    
     texto_raw <- trimws(input$pergunta_usuario)
     if (texto_raw == "") return(NULL)
     
-    # Transforma texto digitado em vetor semântico
     query_vec <- model$encode(list(texto_raw), normalize_embeddings = TRUE)
-    
-    # Calcula similaridade
     scores <- cosine_similarity(query_vec, doc_embeddings)
-    
-    # Filtro de corte mínimo (25%)
     indices_validos <- which(scores >= 0.25)
     
     if (length(indices_validos) == 0) return("NENHUMA")
     
     indices_ordenados <- indices_validos[order(scores[indices_validos], decreasing = TRUE)]
-    
     df_res <- df_faq[indices_ordenados, ]
     df_res$Score <- scores[indices_ordenados]
-    
     return(df_res)
   })
   
-  # Renderização da Interface
   output$respostas_container <- renderUI({
     res <- resultados_ranqueados()
-    
     if (is.null(res)) return(NULL)
-    
     if (is.character(res) && res == "NENHUMA") {
       return(
         div(class = "alert alert-warning text-center p-4",
@@ -213,16 +142,9 @@ server <- function(input, output, session) {
     }
     
     melhor_resposta <- criar_card(res[1, ], 1, "Principal Resposta Encontrada")
-    
-    if (nrow(res) == 1) {
-      return(tagList(
-        h4(class = "mb-3", "Resultado da Busca:"),
-        melhor_resposta
-      ))
-    }
+    if (nrow(res) == 1) return(tagList(h4(class = "mb-3", "Resultado da Busca:"), melhor_resposta))
     
     total_opcoes <- min(nrow(res), 10)
-    
     cards_secundarios <- NULL
     if (mostrar_mais()) {
       cards_secundarios <- lapply(2:total_opcoes, function(i) {
@@ -233,38 +155,22 @@ server <- function(input, output, session) {
     tagList(
       h4(class = "mb-3", "Resultado da Busca:"),
       melhor_resposta,
-      
       if (!mostrar_mais()) {
         div(class = "text-center my-3",
-          actionButton(
-            "btn_mostrar_mais", 
-            paste("Mostrar mais respostas (", total_opcoes - 1, "outras opções )"), 
-            class = "btn-outline-primary fw-bold px-4 py-2"
-          )
+          actionButton("btn_mostrar_mais", paste("Mostrar mais respostas (", total_opcoes - 1, "outras opções )"), class = "btn-outline-primary fw-bold px-4 py-2")
         )
       } else {
-        tagList(
-          hr(class = "my-4"),
-          h5(class = "mb-3 text-muted", "Outras respostas possíveis:"),
-          cards_secundarios
-        )
+        tagList(hr(class = "my-4"), h5(class = "mb-3 text-muted", "Outras respostas possíveis:"), cards_secundarios)
       }
     )
   })
 }
 
-# ==============================================================================
-# 5. EXECUÇÃO ADAPTADA PARA O RENDER (PORT BINDING)
-# ==============================================================================
-
-# Captura a porta injetada pelo Render ou define 10000 como padrão
+# Bind correto para o Render
 porta_app <- as.numeric(Sys.getenv("PORT", unset = "10000"))
 
 shinyApp(
   ui = ui, 
   server = server,
-  options = list(
-    host = "0.0.0.0", 
-    port = porta_app
-  )
+  options = list(host = "0.0.0.0", port = porta_app)
 )
