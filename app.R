@@ -2,7 +2,6 @@ library(shiny)
 library(bslib)
 library(readxl)
 library(shinycssloaders)
-library(reticulate)
 
 # Mapeia a pasta 'imagens' caso exista
 if (dir.exists("imagens")) {
@@ -10,7 +9,130 @@ if (dir.exists("imagens")) {
 }
 
 # ==============================================================================
-# UI - INTERFACE DO USUÁRIO
+# 1. CARREGAMENTO DOS DADOS E MOTOR TF-IDF NATIVO
+# ==============================================================================
+
+dados_excel <- read_excel("Problemas e soluções para IA.xlsx")
+
+if (!"Imagem" %in% colnames(dados_excel)) {
+  dados_excel$Imagem <- NA
+}
+
+df_faq <- data.frame(
+  Problema = as.character(dados_excel$`Problema relatado`),
+  Solucao = as.character(dados_excel$`Solução`),
+  Imagem = trimws(as.character(dados_excel$Imagem)),
+  stringsAsFactors = FALSE
+)
+
+# Prepara texto para indexação
+df_faq$TextoLimpo <- tolower(paste(df_faq$Problema, df_faq$Solucao))
+
+# Função para Tokenização e TF-IDF ultra leve
+tokenizar <- function(texto) {
+  texto <- gsub("[[:punct:]]", " ", tolower(texto))
+  palavras <- unlist(strsplit(texto, "\\s+"))
+  palavras[nchar(palavras) >= 2]
+}
+
+# Cria Vocabulário e Matriz Termo-Documento
+corpus_tokens <- lapply(df_faq$TextoLimpo, tokenizar)
+vocabulario <- unique(unlist(corpus_tokens))
+N <- length(corpus_tokens)
+
+# IDF (Inverse Document Frequency)
+idf <- sapply(vocabulario, function(w) {
+  df_count <- sum(sapply(corpus_tokens, function(doc) w %in% doc))
+  log((N + 1) / (df_count + 1)) + 1
+})
+
+# Matriz TF-IDF dos Documentos
+doc_tfidf <- matrix(0, nrow = N, ncol = length(vocabulario))
+colnames(doc_tfidf) <- vocabulario
+
+for (i in 1:N) {
+  tokens <- corpus_tokens[[i]]
+  if (length(tokens) > 0) {
+    tf <- table(tokens) / length(tokens)
+    for (w in names(tf)) {
+      if (w %in% vocabulario) {
+        doc_tfidf[i, w] <- tf[w] * idf[w]
+      }
+    }
+  }
+  # Normalização L2 (Cosseno)
+  norma <- sqrt(sum(doc_tfidf[i, ]^2))
+  if (norma > 0) doc_tfidf[i, ] <- doc_tfidf[i, ] / norma
+}
+
+# Helper para calcular Similaridade da Pergunta
+calcular_scores <- function(query) {
+  q_tokens <- tokenizar(query)
+  if (length(q_tokens) == 0) return(rep(0, N))
+  
+  q_tf <- table(q_tokens) / length(q_tokens)
+  q_vec <- numeric(length(vocabulario))
+  names(q_vec) <- vocabulario
+  
+  for (w in names(q_tf)) {
+    if (w %in% vocabulario) {
+      q_vec[w] <- q_tf[w] * idf[w]
+    }
+  }
+  
+  norma_q <- sqrt(sum(q_vec^2))
+  if (norma_q > 0) q_vec <- q_vec / norma_q
+  
+  # Similaridade de Cosseno (Produto Escalar)
+  as.numeric(doc_tfidf %*% q_vec)
+}
+
+# Helper para Cartões de Resposta
+criar_card <- function(res_row, i, titulo_prefixo = "Resultado Relevante") {
+  imagem_nome <- res_row$Imagem
+  tem_imagem <- !is.na(imagem_nome) && 
+                imagem_nome != "" && 
+                imagem_nome != "NA" && 
+                tolower(imagem_nome) != "nan"
+  
+  src_caminho <- NULL
+  if (tem_imagem) {
+    if (file.exists(file.path("imagens", imagem_nome))) {
+      src_caminho <- file.path("imagens", imagem_nome)
+    } else if (file.exists(file.path("www", imagem_nome))) {
+      src_caminho <- imagem_nome
+    } else {
+      src_caminho <- file.path("imagens", imagem_nome)
+    }
+  }
+  
+  card(
+    class = "mb-3 border-start border-primary border-4 shadow-sm",
+    card_header(
+      class = "d-flex justify-content-between align-items-center fw-bold text-primary",
+      paste(titulo_prefixo, "#", i),
+      span(class = "badge bg-light text-primary border", sprintf("Relevância: %.0f%%", res_row$Score * 100))
+    ),
+    card_body(
+      p(tags$b("Problema: "), res_row$Problema),
+      hr(),
+      p(tags$b("💡 Solução Encontrada: "), res_row$Solucao, style = "font-size: 1.05rem;"),
+      
+      if (tem_imagem) {
+        div(class = "text-center mt-3",
+          tags$img(
+            src = src_caminho, 
+            alt = "Imagem da Solução",
+            style = "max-width: 100%; height: auto; border: 1px solid #dee2e6; border-radius: 6px; padding: 4px;"
+          )
+        )
+      }
+    )
+  )
+}
+
+# ==============================================================================
+# 2. INTERFACE DO USUÁRIO (UI)
 # ==============================================================================
 
 ui <- page_fluid(
@@ -25,136 +147,35 @@ ui <- page_fluid(
     card(
       card_body(
         class = "d-flex flex-column gap-2",
-        textAreaInput(
-          "pergunta_usuario", 
-          label = NULL, 
-          placeholder = "Ex: cadastro de usuário", 
-          rows = 3, 
-          width = "100%"
-        ),
-        actionButton(
-          "btn_perguntar", 
-          "Buscar Resposta", 
-          class = "btn-primary w-100 fw-bold py-2"
-        )
+        textAreaInput("pergunta_usuario", label = NULL, placeholder = "Ex: cadastro de usuário", rows = 3, width = "100%"),
+        actionButton("btn_perguntar", "Buscar Resposta", class = "btn-primary w-100 fw-bold py-2")
       )
     ),
     
     br(),
     
-    withSpinner(
-      uiOutput("respostas_container"), 
-      type = 6, 
-      color = "#0d6efd", 
-      size = 1
-    )
+    withSpinner(uiOutput("respostas_container"), type = 6, color = "#0d6efd", size = 1)
   )
 )
 
 # ==============================================================================
-# SERVER - LÓGICA DO SERVIDOR
+# 3. LÓGICA DO SERVIDOR (SERVER)
 # ==============================================================================
 
 server <- function(input, output, session) {
   
-  # Estados reativos
   mostrar_mais <- reactiveVal(FALSE)
   
-  # Função para carregar o modelo Python apenas quando necessário
-  get_modelo_e_dados <- reactiveExpr({
-    message(">>> Inicializando Python e Modelo Semântico...")
-    
-    if (file.exists("/opt/venv/bin/python")) {
-      use_virtualenv("/opt/venv", required = TRUE)
-    }
-    
-    st <- import("sentence_transformers")
-    model <- st$SentenceTransformer("sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
-    
-    dados_excel <- read_excel("Problemas e soluções para IA.xlsx")
-    if (!"Imagem" %in% colnames(dados_excel)) {
-      dados_excel$Imagem <- NA
-    }
-    
-    df_faq <- data.frame(
-      Problema = as.character(dados_excel$`Problema relatado`),
-      Solucao = as.character(dados_excel$`Solução`),
-      Imagem = trimws(as.character(dados_excel$Imagem)),
-      stringsAsFactors = FALSE
-    )
-    
-    df_faq$TextoCompleto <- paste("Problema:", df_faq$Problema, "| Solução:", df_faq$Solucao)
-    doc_embeds <- model$encode(df_faq$TextoCompleto, normalize_embeddings = TRUE)
-    
-    list(model = model, doc_embeds = doc_embeds, df_faq = df_faq)
-  })
-
   observeEvent(input$btn_perguntar, { mostrar_mais(FALSE) })
   observeEvent(input$btn_mostrar_mais, { mostrar_mais(TRUE) })
   
-  cosine_similarity <- function(query_vec, doc_vecs) {
-    as.numeric(doc_vecs %*% t(query_vec))
-  }
-  
-  criar_card <- function(res_row, i, titulo_prefixo = "Resultado Relevante") {
-    imagem_nome <- res_row$Imagem
-    tem_imagem <- !is.na(imagem_nome) && 
-                  imagem_nome != "" && 
-                  imagem_nome != "NA" && 
-                  tolower(imagem_nome) != "nan"
-    
-    src_caminho <- NULL
-    if (tem_imagem) {
-      if (file.exists(file.path("imagens", imagem_nome))) {
-        src_caminho <- file.path("imagens", imagem_nome)
-      } else if (file.exists(file.path("www", imagem_nome))) {
-        src_caminho <- imagem_nome
-      } else {
-        src_caminho <- file.path("imagens", imagem_nome)
-      }
-    }
-    
-    card(
-      class = "mb-3 border-start border-primary border-4 shadow-sm",
-      card_header(
-        class = "d-flex justify-content-between align-items-center fw-bold text-primary",
-        paste(titulo_prefixo, "#", i),
-        span(class = "badge bg-light text-primary border", sprintf("Relevância: %.0f%%", res_row$Score * 100))
-      ),
-      card_body(
-        p(tags$b("Problema: "), res_row$Problema),
-        hr(),
-        p(tags$b("💡 Solução Encontrada: "), res_row$Solucao, style = "font-size: 1.05rem;"),
-        
-        if (tem_imagem) {
-          div(class = "text-center mt-3",
-            tags$img(
-              src = src_caminho, 
-              alt = "Imagem da Solução",
-              style = "max-width: 100%; height: auto; border: 1px solid #dee2e6; border-radius: 6px; padding: 4px;"
-            )
-          )
-        }
-      )
-    )
-  }
-  
-  # Processamento ao clicar em Buscar Resposta
   resultados_ranqueados <- eventReactive(input$btn_perguntar, {
     req(input$pergunta_usuario)
     texto_raw <- trimws(input$pergunta_usuario)
     if (texto_raw == "") return(NULL)
     
-    # Executa o carregamento sem travar o loop do Shiny
-    base_ia <- get_modelo_e_dados()
-    
-    model <- base_ia$model
-    doc_embeds <- base_ia$doc_embeds
-    df_faq <- base_ia$df_faq
-    
-    query_vec <- model$encode(list(texto_raw), normalize_embeddings = TRUE)
-    scores <- cosine_similarity(query_vec, doc_embeds)
-    indices_validos <- which(scores >= 0.25)
+    scores <- calcular_scores(texto_raw)
+    indices_validos <- which(scores > 0.05) # Filtro de corte leve
     
     if (length(indices_validos) == 0) return("NENHUMA")
     
@@ -173,7 +194,7 @@ server <- function(input, output, session) {
       return(
         div(class = "alert alert-warning text-center p-4",
           h5(class = "fw-bold", "Tópico não encontrado"),
-          p("Desculpe, não encontrei nada semanticamente relacionado ao tópico em minha base de dados."),
+          p("Desculpe, não encontrei nada relacionado ao tópico em minha base de dados."),
           p(class = "mb-0", tags$b("Enviar e-mail para a GSEOF solicitando maiores informações."))
         )
       )
@@ -205,7 +226,7 @@ server <- function(input, output, session) {
 }
 
 # ==============================================================================
-# EXECUÇÃO DO SHINY
+# 4. EXECUÇÃO DO SHINY (PORT BINDING)
 # ==============================================================================
 
 porta_app <- as.numeric(Sys.getenv("PORT", unset = "10000"))
@@ -213,8 +234,5 @@ porta_app <- as.numeric(Sys.getenv("PORT", unset = "10000"))
 shinyApp(
   ui = ui, 
   server = server,
-  options = list(
-    host = "0.0.0.0", 
-    port = porta_app
-  )
+  options = list(host = "0.0.0.0", port = porta_app)
 )
